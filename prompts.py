@@ -44,17 +44,39 @@ Rules:
 - Explicitly connect the analogy back to the technical concept in the last sentence.
 """
 
-# 3. Generate quiz questions
+# 3. Generate quiz questions (structured JSON so the app can render a real,
+#    gradable quiz form instead of a wall of text)
 QUIZ_PROMPT = """You are Buddy, a friendly AI tutor.
 
 Create a {num_questions}-question quiz about "{topic}" for a beginner who just
 learned the basics.
 
+Respond with ONLY valid JSON (no markdown fences, no commentary), matching
+exactly this shape:
+
+{{
+  "questions": [
+    {{
+      "type": "mcq",
+      "question": "...",
+      "options": ["...", "...", "...", "..."],
+      "correct_index": 0,
+      "explanation": "one sentence on why that's correct"
+    }},
+    {{
+      "type": "short",
+      "question": "...",
+      "sample_answer": "a concise correct answer",
+      "explanation": "one sentence on why that's correct"
+    }}
+  ]
+}}
+
 Rules:
-- Mix of question types (multiple choice and short answer) is fine.
-- Number the questions 1-{num_questions}.
-- Do NOT reveal the answers in this response — list the questions only.
+- Exactly {num_questions} questions total, mixing "mcq" and "short" types.
+- "mcq" questions need exactly 4 options and a correct_index (0-3).
 - Keep each question focused on one idea; avoid trick questions.
+- Do not include any text outside the JSON object.
 """
 
 # 4. Evaluate / give feedback on a learner's answer

@@ -38,3 +38,40 @@ def chat(provider: str, api_key: str, model: str, system_prompt: str, history: l
         return response.text
 
     raise ValueError(f"Unknown provider: {provider}")
+
+
+def chat_json(provider: str, api_key: str, model: str, system_prompt: str, user_prompt: str) -> str:
+    """Same as chat(), but asks the provider for JSON-mode output where supported.
+    Always returns raw text; caller is responsible for json.loads (after strip_json_fences)."""
+    if provider in ("OpenAI", "Groq"):
+        base_url = PROVIDERS[provider]["base_url"]
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+        try:
+            response = client.chat.completions.create(
+                model=model, messages=messages, temperature=0.5, response_format={"type": "json_object"}
+            )
+        except Exception:
+            response = client.chat.completions.create(model=model, messages=messages, temperature=0.5)
+        return response.choices[0].message.content
+
+    if provider == "Gemini":
+        import google.generativeai as genai
+
+        genai.configure(api_key=api_key)
+        gemini_model = genai.GenerativeModel(
+            model, system_instruction=system_prompt, generation_config={"response_mime_type": "application/json"}
+        )
+        response = gemini_model.generate_content(user_prompt)
+        return response.text
+
+    raise ValueError(f"Unknown provider: {provider}")
+
+
+def strip_json_fences(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return text.strip()

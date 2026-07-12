@@ -1,6 +1,8 @@
+import json
+
 import streamlit as st
 
-from llm import chat, PROVIDERS
+from llm import chat, chat_json, strip_json_fences, PROVIDERS
 from prompts import (
     PERSONA_SYSTEM_PROMPT,
     EXPLAIN_PROMPT,
@@ -16,8 +18,10 @@ DEFAULT_TOPIC = "How Bitcoin Mining Works"
 
 if "history" not in st.session_state:
     st.session_state.history = []  # list of (role, content) for display
-if "last_quiz" not in st.session_state:
-    st.session_state.last_quiz = None
+if "quiz_questions" not in st.session_state:
+    st.session_state.quiz_questions = None  # list of dicts, see QUIZ_PROMPT's JSON shape
+if "quiz_results" not in st.session_state:
+    st.session_state.quiz_results = None  # list of per-question grading dicts, or None if ungraded
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -33,7 +37,8 @@ with st.sidebar:
 
     if st.button("Clear conversation"):
         st.session_state.history = []
-        st.session_state.last_quiz = None
+        st.session_state.quiz_questions = None
+        st.session_state.quiz_results = None
         st.rerun()
 
 st.title("🧠 AI Learning Buddy")
@@ -59,6 +64,20 @@ def ask(prompt_text: str, display_label: str):
     st.session_state.history.append(("assistant", reply))
 
 
+def grade_short_answer(question: str, learner_answer: str) -> tuple:
+    """Returns (verdict, feedback_text). verdict is 'correct', 'partial', or 'incorrect'."""
+    prompt_text = FEEDBACK_PROMPT.format(topic=topic, question=question, learner_answer=learner_answer)
+    feedback = chat(provider, api_key, model, PERSONA_SYSTEM_PROMPT, [], prompt_text)
+    lowered = feedback.lower()
+    if "incorrect" in lowered:
+        verdict = "incorrect"
+    elif "partially" in lowered or "partial" in lowered:
+        verdict = "partial"
+    else:
+        verdict = "correct"
+    return verdict, feedback
+
+
 # ---------- Activity picker ----------
 activity = st.radio(
     "What should Buddy do?",
@@ -80,17 +99,58 @@ elif activity == "📝 Quiz me":
             st.error(f"Add your {provider} API key in the sidebar to talk to Buddy.")
         else:
             prompt_text = QUIZ_PROMPT.format(topic=topic, num_questions=num_questions)
-            st.session_state.history.append(("user", f"Quiz me on: {topic}"))
             with st.spinner("Buddy is writing your quiz..."):
                 try:
-                    reply = call_llm(prompt_text)
+                    raw = chat_json(provider, api_key, model, PERSONA_SYSTEM_PROMPT, prompt_text)
+                    questions = json.loads(strip_json_fences(raw))["questions"]
                 except Exception as e:
-                    st.session_state.history.pop()
-                    st.error(f"{provider} request failed: {e}")
-                    reply = None
-            if reply is not None:
-                st.session_state.history.append(("assistant", reply))
-                st.session_state.last_quiz = reply
+                    st.error(f"Couldn't generate a valid quiz ({e}). Try again.")
+                    questions = None
+            if questions:
+                st.session_state.quiz_questions = questions
+                st.session_state.quiz_results = None
+
+    if st.session_state.quiz_questions:
+        with st.form("quiz_form"):
+            for i, q in enumerate(st.session_state.quiz_questions):
+                st.markdown(f"**{i + 1}. {q['question']}**")
+                if q["type"] == "mcq":
+                    st.radio("Choose one", q["options"], key=f"quiz_answer_{i}", index=None, label_visibility="collapsed")
+                else:
+                    st.text_area("Your answer", key=f"quiz_answer_{i}", label_visibility="collapsed")
+            submitted = st.form_submit_button("Submit Quiz")
+
+        if submitted:
+            results = []
+            with st.spinner("Grading your answers..."):
+                for i, q in enumerate(st.session_state.quiz_questions):
+                    user_answer = st.session_state.get(f"quiz_answer_{i}")
+                    if q["type"] == "mcq":
+                        correct_option = q["options"][q["correct_index"]]
+                        is_correct = user_answer == correct_option
+                        results.append(
+                            {
+                                "verdict": "correct" if is_correct else "incorrect",
+                                "feedback": q["explanation"],
+                                "correct_answer": correct_option,
+                            }
+                        )
+                    else:
+                        if not user_answer:
+                            results.append({"verdict": "incorrect", "feedback": "No answer submitted.", "correct_answer": q["sample_answer"]})
+                        else:
+                            verdict, feedback = grade_short_answer(q["question"], user_answer)
+                            results.append({"verdict": verdict, "feedback": feedback, "correct_answer": q["sample_answer"]})
+            st.session_state.quiz_results = results
+
+    if st.session_state.quiz_results:
+        icons = {"correct": "✅", "partial": "🟡", "incorrect": "❌"}
+        score = sum(1 for r in st.session_state.quiz_results if r["verdict"] == "correct")
+        st.subheader(f"Score: {score}/{len(st.session_state.quiz_results)}")
+        for i, r in enumerate(st.session_state.quiz_results):
+            st.markdown(f"{icons[r['verdict']]} **Question {i + 1}** — {r['feedback']}")
+            if r["verdict"] != "correct":
+                st.caption(f"Correct answer: {r['correct_answer']}")
 
 elif activity == "🚀 Full session":
     if st.button("Start full lesson"):
@@ -98,11 +158,12 @@ elif activity == "🚀 Full session":
         ask(prompt_text, f"Start a full learning session on: {topic}")
 
 elif activity == "✅ Get feedback on an answer":
-    if not st.session_state.last_quiz:
-        st.info("Generate a quiz first (under 'Quiz me' or 'Full session'), then come back here to submit an answer.")
+    if not st.session_state.quiz_questions:
+        st.info("Generate a quiz first (under 'Quiz me'), then come back here to submit an answer to any question.")
     else:
         with st.expander("Show the quiz again"):
-            st.write(st.session_state.last_quiz)
+            for i, q in enumerate(st.session_state.quiz_questions):
+                st.write(f"{i + 1}. {q['question']}")
         question = st.text_input("Paste the question you're answering")
         learner_answer = st.text_area("Your answer")
         if st.button("Check my answer"):
