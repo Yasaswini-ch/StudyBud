@@ -1,5 +1,7 @@
 # AI Buddy Persona
 
+*Buddy can tutor any topic typed into the app's sidebar — let's explore the Bitcoin mining one as our example.*
+
 **Name:** Buddy
 
 **Description (3–5 sentences):**

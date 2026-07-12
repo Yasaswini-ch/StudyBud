@@ -2,8 +2,9 @@
 
 An AI Learning Buddy built with Streamlit. It explains a topic, gives a
 real-life example, quizzes the learner, and gives feedback on their answers —
-using five reusable prompt templates that work for any topic, not just this
-one. Supports **OpenAI**, **Groq**, or **Gemini** as the model provider
+using five reusable prompt templates that work for **any topic** you type
+into the sidebar. Let's explore the Bitcoin mining one as our example.
+Supports **OpenAI**, **Groq**, or **Gemini** as the model provider
 (switchable from the sidebar), so you're not stuck if one provider's quota
 runs out.
 
